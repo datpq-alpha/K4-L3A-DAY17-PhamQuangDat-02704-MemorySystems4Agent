@@ -149,7 +149,12 @@ Nếu muốn chạy chế độ live với LLM thật, hãy tạo file `.env` �
 LLM_PROVIDER=openai
 LLM_MODEL=gpt-4o-mini
 OPENAI_API_KEY=...
+LLM_MAX_RETRIES=5
+LLM_RETRY_INITIAL_DELAY=1
+LLM_RETRY_MAX_DELAY=30
 ```
+
+Khi provider trả lỗi tạm thời như `429`, timeout hoặc `5xx`, đường live sẽ retry theo cấp số nhân có jitter và ưu tiên header `Retry-After` nếu có. `LLM_MAX_RETRIES` là số lần thử lại sau request đầu tiên. Lỗi xác thực và lỗi cấu hình không được retry để tránh chờ vô ích. Benchmark mặc định dùng offline mode nên không tiêu tốn API quota.
 
 ## Chạy benchmark và test
 
@@ -164,6 +169,23 @@ pytest src/test_agents.py -v
 ```
 
 Benchmark cần in ra hai bảng: **Standard Benchmark** và **Long-Context Stress Benchmark**. Mỗi bảng so sánh Baseline với Advanced theo đủ 6 cột trong phần "Chỉ số benchmark cần hiểu".
+
+### Phân tích kết quả tham chiếu
+
+Với cấu hình mặc định và token estimator offline, lần kiểm chứng hiện tại cho kết quả chính như sau:
+
+| Suite | Agent | Prompt tokens processed | Recall | Memory bytes | Compactions |
+|---|---|---:|---:|---:|---:|
+| Standard | Baseline | 14,156 | 0.000 | 0 | 0 |
+| Standard | Advanced | 23,445 | 1.000 | 280 | 0 |
+| Long-context | Baseline | 22,433 | 0.000 | 0 | 0 |
+| Long-context | Advanced | 14,003 | 1.000 | 219 | 4 |
+
+Ở benchmark ngắn, Advanced xử lý nhiều prompt token hơn vì mỗi lượt còn mang thêm `User.md`; đây là chi phí của persistent memory khi lịch sử chưa đủ dài để compact. Đổi lại, profile có cấu trúc giúp Advanced recall đầy đủ qua thread mới, còn Baseline đúng thiết kế phải quên.
+
+Ở stress benchmark, bốn lần compaction kéo prompt load của Advanced xuống khoảng 37.6% so với Baseline trong khi vẫn giữ recall. Compact vì vậy chủ yếu tối ưu lượng context được xử lý qua nhiều lượt, không nhất thiết làm output ngắn hơn. Các con số là ước lượng deterministic để so sánh tương đối, không phải billing token chính xác của một provider.
+
+`User.md` vẫn có chi phí tăng trưởng và có thể lưu sai fact. Implementation giảm rủi ro này bằng field có cấu trúc, cập nhật tại chỗ khi có correction, bỏ qua câu hỏi và một số mẫu nhiễu rõ ràng. Với input tự do ngoài benchmark, extractor dựa trên rule vẫn có thể bỏ sót cách diễn đạt mới; production nên bổ sung confidence score, audit log và memory decay.
 
 ## Cách dùng repo này
 
