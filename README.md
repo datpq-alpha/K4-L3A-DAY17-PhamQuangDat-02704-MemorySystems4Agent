@@ -35,7 +35,7 @@ Sau khi hoàn thành, các bạn cần có khả năng:
 ├── data/            # dữ liệu benchmark dùng chung
 │   ├── conversations.json
 │   └── advanced_long_context.json
-└── src/             # bản scaffold dành cho sinh viên (pseudocode + TODO)
+└── src/             # implementation, benchmark và test của bài lab
     ├── model_provider.py
     ├── config.py
     ├── memory_store.py
@@ -176,14 +176,14 @@ Với cấu hình mặc định và token estimator offline, lần kiểm chứn
 
 | Suite | Agent | Prompt tokens processed | Recall | Memory bytes | Compactions |
 |---|---|---:|---:|---:|---:|
-| Standard | Baseline | 14,156 | 0.000 | 0 | 0 |
-| Standard | Advanced | 23,445 | 1.000 | 280 | 0 |
-| Long-context | Baseline | 22,433 | 0.000 | 0 | 0 |
-| Long-context | Advanced | 14,003 | 1.000 | 219 | 4 |
+| Standard | Baseline | 14,272 | 0.000 | 0 | 0 |
+| Standard | Advanced | 22,655 | 1.000 | 280 | 0 |
+| Long-context | Baseline | 22,550 | 0.000 | 0 | 0 |
+| Long-context | Advanced | 15,283 | 1.000 | 219 | 5 |
 
 Ở benchmark ngắn, Advanced xử lý nhiều prompt token hơn vì mỗi lượt còn mang thêm `User.md`; đây là chi phí của persistent memory khi lịch sử chưa đủ dài để compact. Đổi lại, profile có cấu trúc giúp Advanced recall đầy đủ qua thread mới, còn Baseline đúng thiết kế phải quên.
 
-Ở stress benchmark, bốn lần compaction kéo prompt load của Advanced xuống khoảng 37.6% so với Baseline trong khi vẫn giữ recall. Compact vì vậy chủ yếu tối ưu lượng context được xử lý qua nhiều lượt, không nhất thiết làm output ngắn hơn. Các con số là ước lượng deterministic để so sánh tương đối, không phải billing token chính xác của một provider.
+Ở stress benchmark, năm lần compaction giảm prompt load của Advanced khoảng 32.2% so với Baseline trong khi vẫn giữ recall. Compact vì vậy chủ yếu tối ưu lượng context được xử lý qua nhiều lượt, không nhất thiết làm output ngắn hơn. Các con số là ước lượng deterministic để so sánh tương đối, không phải billing token chính xác của một provider.
 
 `User.md` vẫn có chi phí tăng trưởng và có thể lưu sai fact. Implementation giảm rủi ro này bằng field có cấu trúc, cập nhật tại chỗ khi có correction, bỏ qua câu hỏi và một số mẫu nhiễu rõ ràng. Với input tự do ngoài benchmark, extractor dựa trên rule vẫn có thể bỏ sót cách diễn đạt mới; production nên bổ sung confidence score, audit log và memory decay.
 

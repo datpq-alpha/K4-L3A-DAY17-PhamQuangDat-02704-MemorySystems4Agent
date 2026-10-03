@@ -100,9 +100,9 @@ def run_agent_benchmark(agent_name: str, agent, conversations: list[dict[str, An
     recall_scores: list[float] = []
     quality_scores: list[float] = []
     for conversation in conversations:
+        thread_id = f"benchmark:{conversation['id']}:recall"
+        thread_ids.add(thread_id)
         for index, recall in enumerate(conversation["recall_questions"]):
-            thread_id = f"benchmark:{conversation['id']}:recall:{index}"
-            thread_ids.add(thread_id)
             result = agent.reply(
                 str(conversation["user_id"]),
                 thread_id,

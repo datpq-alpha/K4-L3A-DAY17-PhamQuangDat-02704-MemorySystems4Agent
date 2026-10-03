@@ -4,8 +4,10 @@ from pathlib import Path
 
 from agent_advanced import AdvancedAgent
 from agent_baseline import BaselineAgent
+from benchmark import run_agent_benchmark
 from config import load_config
 from memory_store import CompactMemoryManager, UserProfileStore, extract_profile_updates
+from memory_store import estimate_tokens
 from model_provider import ProviderConfig, invoke_with_retry
 
 
@@ -27,6 +29,8 @@ def test_user_markdown_read_write_edit(tmp_path: Path) -> None:
     """Student TODO: verify `User.md` can be created, updated, and edited."""
 
     store = UserProfileStore(tmp_path / "profiles")
+    assert store.read_text("new-user") == ""
+    assert store.path_for("../../outside").resolve().is_relative_to(store.root_dir.resolve())
     path = store.write_text("dungct", "# User Profile\n- location: Đà Nẵng")
 
     assert path.name == "User.md"
@@ -51,6 +55,16 @@ def test_compact_trigger(tmp_path: Path) -> None:
     assert manager.compaction_count("thread") > 0
     assert context["summary"]
     assert len(context["messages"]) <= 2
+
+    repeated = CompactMemoryManager(threshold_tokens=50, keep_messages=2)
+    repeated.append("repeated", "user", "SENTINEL-FIRST " + "nội dung " * 30)
+    for index in range(60):
+        repeated.append("repeated", "user", f"turn {index} " + "nội dung mới " * 30)
+    repeated_context = repeated.context("repeated")
+    assert repeated.compaction_count("repeated") > 1
+    assert "SENTINEL-FIRST" in repeated_context["summary"]
+    assert len(repeated_context["summary"]) < 3000
+    assert len(repeated_context["messages"]) <= 2
     return None
 
     raise NotImplementedError
@@ -151,3 +165,64 @@ def test_llm_retry_uses_exponential_backoff() -> None:
     assert result == "ok"
     assert model.calls == 3
     assert delays == [1.0, 2.0]
+
+
+def test_token_estimator_is_deterministic_and_monotonic() -> None:
+    sample = "Memory system cho AI agent"
+
+    assert estimate_tokens("") == 0
+    assert estimate_tokens("   ") == 0
+    assert estimate_tokens(sample) == estimate_tokens(sample)
+    assert estimate_tokens(sample * 2) >= estimate_tokens(sample)
+
+
+def test_advanced_respects_three_bullet_style_in_new_thread(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    agent = AdvancedAgent(config, force_offline=True)
+    user_id = "styled-user"
+    agent.reply(
+        user_id,
+        "old-thread",
+        "Mình tên là DũngCT Stress, hiện tại mình đang ở Đà Nẵng và vẫn làm "
+        "MLOps engineer. Mình muốn bạn trả lời ngắn gọn thành 3 bullet, có ví dụ "
+        "thực chiến và nhấn vào trade-off.",
+    )
+
+    answer = agent.reply(
+        user_id,
+        "new-thread",
+        "Nhắc lại tên, nghề nghiệp, nơi ở hiện tại và style trả lời mình thích?",
+    )["response"]
+    bullets = [line for line in answer.splitlines() if line.startswith("- ")]
+
+    assert len(bullets) == 3
+    assert "DũngCT Stress" in answer
+    assert "MLOps engineer" in answer
+    assert "Đà Nẵng" in answer
+    assert "3 bullet" in answer
+    assert "trade-off" in answer
+
+
+def test_benchmark_reuses_one_fresh_recall_thread_per_conversation(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    agent = BaselineAgent(config, force_offline=True)
+    conversations = [
+        {
+            "id": "probe",
+            "user_id": "same-user",
+            "turns": ["Mình tên là DũngCT."],
+            "recall_questions": [
+                {"question": "Mình tên gì?", "expected_contains": ["DũngCT"]},
+                {"question": "Nhắc lại tên mình?", "expected_contains": ["DũngCT"]},
+            ],
+        }
+    ]
+
+    row = run_agent_benchmark("Baseline", agent, conversations, config)
+
+    assert set(agent.sessions) == {
+        "benchmark:probe:conversation",
+        "benchmark:probe:recall",
+    }
+    assert len(agent.sessions["benchmark:probe:recall"].messages) == 4
+    assert row.recall_score == 0.0

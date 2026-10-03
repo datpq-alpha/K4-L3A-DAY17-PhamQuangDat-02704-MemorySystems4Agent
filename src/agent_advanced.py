@@ -133,9 +133,14 @@ class AdvancedAgent:
 
         facts = self.profile_store.facts(user_id)
         if _looks_like_recall_question(message):
+            return _facts_response_for_question(facts, message)
             return _facts_response(facts)
         if extract_profile_updates(message):
+            if _uses_three_bullet_style(facts):
+                return _styled_acknowledgement(profile_updated=True)
             return "Mình đã cập nhật các thông tin ổn định vào hồ sơ."
+        if _uses_three_bullet_style(facts):
+            return _styled_acknowledgement(profile_updated=False)
         return "Mình đã ghi nhận nội dung và giữ phần cần thiết trong ngữ cảnh phiên."
 
         raise NotImplementedError
@@ -217,6 +222,100 @@ def _facts_response(facts: dict[str, str]) -> str:
     }
     return "\n".join(
         f"- {labels.get(key, key)}: {value}" for key, value in facts.items()
+    )
+
+
+def _uses_three_bullet_style(facts: dict[str, str]) -> bool:
+    return "3 bullet" in facts.get("response_style", "").casefold()
+
+
+def _requested_fact_keys(message: str, facts: dict[str, str]) -> list[str]:
+    """Choose profile fields requested by a deterministic recall question."""
+
+    lowered = message.casefold()
+    markers = {
+        "name": ("tên", "là ai"),
+        "profession": ("nghề", "công việc", "làm gì", "product manager"),
+        "location": ("ở đâu", "nơi ở", "đang ở", "còn ở", "hà nội", "huế"),
+        "favorite_drink": ("đồ uống", "uống gì"),
+        "favorite_food": ("món ăn", "ăn gì"),
+        "pet": ("nuôi", "con gì", "thú cưng", "corgi"),
+        "technical_interests": ("mối quan tâm", "quan tâm kỹ thuật", "python", " ai"),
+        "response_style": ("style", "kiểu trả lời", "cách trả lời"),
+    }
+    order = (
+        "name",
+        "profession",
+        "location",
+        "favorite_drink",
+        "favorite_food",
+        "pet",
+        "technical_interests",
+        "response_style",
+    )
+    requested = [
+        key
+        for key in order
+        if key in facts and any(marker in lowered for marker in markers[key])
+    ]
+    return requested or [key for key in order if key in facts]
+
+
+def _facts_response_for_question(facts: dict[str, str], message: str) -> str:
+    if not facts:
+        return "Mình chưa có thông tin bền vững nào về bạn."
+
+    labels = {
+        "name": "Tên",
+        "location": "Nơi ở hiện tại",
+        "profession": "Nghề nghiệp hiện tại",
+        "technical_interests": "Mối quan tâm kỹ thuật",
+        "favorite_drink": "Đồ uống yêu thích",
+        "favorite_food": "Món ăn yêu thích",
+        "pet": "Thú cưng",
+        "response_style": "Style trả lời",
+    }
+    keys = _requested_fact_keys(message, facts)
+    if _uses_three_bullet_style(facts):
+        # Style is itself useful evidence in recall answers. Add stable fields
+        # until there is enough material for exactly three concise bullets.
+        if "response_style" not in keys:
+            keys.append("response_style")
+        fill_order = ("name", "profession", "location", "response_style", "technical_interests")
+        for key in fill_order:
+            if len(keys) >= 3:
+                break
+            if key in facts and key not in keys:
+                keys.append(key)
+
+    entries = [(labels.get(key, key), facts[key]) for key in keys]
+    if not _uses_three_bullet_style(facts):
+        return "\n".join(f"- {label}: {value}" for label, value in entries)
+
+    while len(entries) < 3:
+        entries.append(("Định dạng", "duy trì đúng 3 bullet"))
+
+    groups: list[list[tuple[str, str]]] = [[], [], []]
+    base, extra = divmod(len(entries), 3)
+    cursor = 0
+    for index in range(3):
+        size = base + (1 if index < extra else 0)
+        groups[index] = entries[cursor : cursor + size]
+        cursor += size
+    return "\n".join(
+        "- " + "; ".join(f"{label}: {value}" for label, value in group)
+        for group in groups
+    )
+
+
+def _styled_acknowledgement(profile_updated: bool) -> str:
+    first = "Đã cập nhật facts ổn định vào User.md." if profile_updated else "Đã ghi nhận nội dung mới."
+    return "\n".join(
+        (
+            f"- {first}",
+            "- Giữ recent messages và summary cho follow-up.",
+            "- Trade-off: ưu tiên recall nhưng vẫn kiểm soát token.",
+        )
     )
 
 

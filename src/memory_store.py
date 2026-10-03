@@ -56,6 +56,7 @@ class UserProfileStore:
         # TODO: return file content or an empty default markdown profile.
         path = self.path_for(user_id)
         if not path.exists():
+            return ""
             return "# User Profile\n"
         return path.read_text(encoding="utf-8")
 
@@ -111,6 +112,8 @@ class UserProfileStore:
             return False
 
         content = self.read_text(user_id).rstrip() + "\n"
+        if not content.strip():
+            content = "# User Profile\n"
         pattern = re.compile(
             rf"^-\s+{re.escape(normalized_key)}\s*:\s*.*$",
             re.IGNORECASE | re.MULTILINE,
@@ -284,6 +287,44 @@ def summarize_messages(messages: list[dict[str, str]], max_items: int = 6) -> st
 
     if not messages:
         return ""
+    if max_items <= 0:
+        return ""
+
+    # A previous compact summary is part of the memory state, rather than an
+    # ordinary old message. Always carry it into the next summary so repeated
+    # compactions do not silently erase the earliest context. Bound its size by
+    # retaining both ends, then use the remaining slots for recent old messages.
+    previous_summaries = [
+        " ".join(str(message.get("content", "")).split())
+        for message in messages
+        if str(message.get("role", "")).strip().lower() == "summary"
+        and str(message.get("content", "")).strip()
+    ]
+    ordinary_messages = [
+        message
+        for message in messages
+        if str(message.get("role", "")).strip().lower() != "summary"
+    ]
+    compacted: list[str] = []
+    if previous_summaries:
+        previous = " | ".join(previous_summaries)
+        while previous.casefold().startswith("summary: "):
+            previous = previous[len("summary: ") :]
+        if len(previous) > 900:
+            previous = previous[:440].rstrip() + " ... " + previous[-440:].lstrip()
+        compacted.append(f"summary: {previous}")
+
+    remaining_slots = max_items - len(compacted)
+    for message in ordinary_messages[-remaining_slots:] if remaining_slots > 0 else []:
+        role = str(message.get("role", "unknown")).strip().lower()
+        content = " ".join(str(message.get("content", "")).split())
+        if not content:
+            continue
+        if len(content) > 220:
+            content = content[:217].rstrip() + "..."
+        compacted.append(f"{role}: {content}")
+    return "\n".join(compacted)
+
     snippets: list[str] = []
     for message in messages[-max_items:]:
         role = str(message.get("role", "unknown")).strip().lower()
